@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<!--suppress HtmlFormInputWithoutLabel -->
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta content="width=device-width, initial-scale=1" name="viewport">
+    <title>tailforward</title>
+    <style>
+        * {
+            box-sizing: border-box
+        }
+
+        body {
+            font: 14px/1.45 system-ui, sans-serif;
+            margin: 0 auto;
+            max-width: 560px;
+            padding: 16px
+        }
+
+        h1 {
+            font-size: 18px;
+            margin: 0 0 2px
+        }
+
+        #status {
+            font-size: 13px;
+            color: #555;
+            margin-bottom: 12px
+        }
+
+        #auth {
+            display: none;
+            background: #fff3d6;
+            border: 1px solid #d9b400;
+            border-radius: 6px;
+            padding: 10px 12px;
+            margin-bottom: 12px
+        }
+
+        #authBody {
+            display: flex;
+            gap: 12px;
+            align-items: center
+        }
+
+        #qr svg {
+            display: block;
+            width: 128px;
+            height: 128px
+        }
+
+        #authLink {
+            word-break: break-all
+        }
+
+        ul {
+            list-style: none;
+            margin: 0 0 12px;
+            padding: 0
+        }
+
+        li {
+            display: flex;
+            gap: 8px;
+            align-items: baseline;
+            padding: 6px 0;
+            border-bottom: 1px solid #eee
+        }
+
+        li code {
+            flex: 1
+        }
+
+        .err {
+            color: #c33;
+            font-size: 12px
+        }
+
+        form {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap
+        }
+
+        input {
+            padding: 6px 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font: inherit
+        }
+
+        input[name=host] {
+            flex: 2 1 120px
+        }
+
+        input[name=rs], input[name=re], input[name=ls] {
+            flex: 1 1 52px;
+            min-width: 52px
+        }
+
+        button {
+            padding: 6px 12px;
+            border: 1px solid #ccc;
+            background: #f6f6f6;
+            border-radius: 4px;
+            cursor: pointer;
+            font: inherit
+        }
+
+        button.primary {
+            background: #222;
+            color: #fff;
+            border-color: #222
+        }
+
+        button.small {
+            padding: 2px 8px;
+            font-size: 12px
+        }
+
+        .hint {
+            font-size: 12px;
+            color: #888
+        }
+
+        code {
+            background: #f2f2f2;
+            padding: 1px 5px;
+            border-radius: 3px
+        }
+    </style>
+</head>
+<body>
+<h1>tailforward</h1>
+<div id="status">starting…</div>
+<div id="auth"></div>
+<div id="reauthRow" style="display:none;margin-bottom:12px">
+    <button class="small" id="reauth">reauth</button>
+</div>
+<ul id="rules"></ul>
+<form id="add">
+    <input autocomplete="off" list="hosts" name="host" placeholder="device" required>
+    <datalist id="hosts"></datalist>
+    <input inputmode="numeric" name="rs" placeholder="from" required>
+    <input inputmode="numeric" name="re" placeholder="to">
+    <input inputmode="numeric" name="ls" placeholder="local" required>
+    <button class="primary">add</button>
+</form>
+<p class="hint" id="hint"></p>
+<script src="qrcode.min.js"></script>
+<script>
+    const $ = (id) => document.getElementById(id);
+    const statusEl = $("status")
+    const authEl = $("auth")
+    const rulesEl = $("rules")
+    const form = $("add")
+    const hostsEl = $("hosts")
+    const hintEl = $("hint")
+    const reauthRow = $("reauthRow")
+    const reauthBtn = $("reauth");
+    let lastAuth = null
+    let lastFrom = "";
+
+    const api = async (path, body) => {
+        const r = await fetch(path, body ? {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify(body)
+        } : {});
+        if (!r.ok) throw new Error(await r.text());
+        return r.json();
+    };
+    const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+    function renderAuth(url) {
+        if (url === lastAuth) return;
+        lastAuth = url;
+        if (!url) {
+            authEl.style.display = "none";
+            authEl.innerHTML = "";
+            return;
+        }
+        authEl.style.display = "block";
+        let qr;
+        try {
+            // noinspection JSUnresolvedReference
+            const c = qrcode(0, "M");
+            c.addData(url);
+            c.make();
+            qr = c.createSvgTag({scalable: true});
+        } catch {
+            qr = "QR unavailable";
+        }
+        authEl.innerHTML = "";
+        authEl.innerHTML = `<div id="authBody"><div id="qr">${qr}</div><div>Scan or open:<br><a id="authLink" href="${esc(url)}" target="_blank" rel="noopener">${esc(url)}</a></div></div>`;
+    }
+
+    async function refresh() {
+        try {
+            const s = await api("/api/state");
+            statusEl.textContent = "tailnet: " + s.status;
+            reauthRow.style.display = /^(starting|connecting)/.test(s.status) ? "none" : "block";
+            renderAuth(s.authURL || "");
+            if (!s.authURL && s.status === "login needed" && !lastAuth) {
+                authEl.style.display = "block";
+                authEl.textContent = "Waiting for the login link…";
+            }
+            hostsEl.innerHTML = (s.devices || []).map(n => `<option value="${esc(n)}">`).join("");
+            rulesEl.innerHTML = (s.rules || []).map(r =>
+                `<li><code>${esc(r.label)}${r.total > 1 ? ` <span class="hint">${r.active}/${r.total}</span>` : ""}</code>` +
+                (r.error ? `<span class="err">${esc(r.error)}</span>` : "") +
+                `<button class="small" data-ls="${r.localStart}">del</button></li>`).join("");
+        } catch (e) {
+            statusEl.textContent = "UI error: " + e;
+        }
+    }
+
+    rulesEl.onclick = async (e) => {
+        const ls = e.target?.dataset?.ls;
+        if (!ls) return;
+        try {
+            await api("/api/rules", {action: "delete", localStart: Number(ls)});
+        } catch (err) {
+            alert(err.message);
+        }
+        await refresh();
+    };
+
+    function hint() {
+        const rs = +form.rs.value, re = +form.re.value || rs, ls = +form.ls.value;
+        hintEl.textContent = rs >= 1 && re >= rs && ls >= 1
+            ? "→ localhost:" + ls + (re > rs ? "-" + (ls + re - rs) : "")
+            : "";
+    }
+
+    form.rs.addEventListener("input", () => {
+        const v = form.rs.value.trim();
+        if (v && v !== lastFrom) {
+            if (!form.re.value || form.re.value === lastFrom) form.re.value = v;
+            if (!form.ls.value || form.ls.value === lastFrom) form.ls.value = v;
+        }
+        lastFrom = v;
+        hint();
+    });
+    form.re.addEventListener("input", hint);
+    form.ls.addEventListener("input", hint);
+
+    form.onsubmit = async (e) => {
+        e.preventDefault();
+        const rs = +form.rs.value, re = +form.re.value || rs;
+        try {
+            await api("/api/rules", {
+                action: "add",
+                host: form.host.value.trim(),
+                remoteStart: rs,
+                remoteEnd: re,
+                localStart: +form.ls.value
+            });
+            form.reset();
+            lastFrom = "";
+            hint();
+            await refresh();
+        } catch (err) {
+            alert(err.message);
+        }
+    };
+
+    reauthBtn.onclick = async () => {
+        reauthBtn.disabled = true;
+        try {
+            await api("/api/reauth", {});
+            await refresh();
+        } catch (err) {
+            /already in progress/.test(err.message) ? await refresh() : alert(err.message);
+        } finally {
+            reauthBtn.disabled = false;
+        }
+    };
+
+    refresh();
+    setInterval(refresh, 2000);
+</script>
+</body>
+</html>

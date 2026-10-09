@@ -1,0 +1,32 @@
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  bin = "./tmp/tailforward.exe"
+  cmd = "go build -buildvcs=false -o ./tmp/tailforward.exe ./cmd/tailforward"
+  delay = 1000
+  entrypoint = ["./tmp/tailforward.exe", "--no-browser"]
+  exclude_dir = ["tmp"]
+  exclude_regex = ["_test.go"]
+  include_ext = ["go", "html", "js", "tmpl"]
+  kill_delay = "500ms"
+  log = "build-errors.log"
+  send_interrupt = true
+  stop_on_error = true
+
+  [build.windows]
+    bin = "tmp\\tailforward.exe"
+    cmd = "go build -buildvcs=false -o ./tmp/tailforward.exe ./cmd/tailforward"
+    entrypoint = ["tmp\\tailforward.exe", "--no-browser"]
+
+[log]
+  time = false
+
+[color]
+  build = "yellow"
+  main = "magenta"
+  runner = "green"
+  watcher = "cyan"
+
+[misc]
+  clean_on_exit = true
