@@ -26,11 +26,11 @@ type Server struct {
 	inner *tsnet.Server
 }
 
-func New(dir string, userLogf func(string, ...any)) *Server {
+func New(dir string, ephemeral bool, userLogf func(string, ...any)) *Server {
 	return &Server{inner: &tsnet.Server{
 		Hostname:  "tailforward",
 		Dir:       dir,
-		Ephemeral: true,
+		Ephemeral: ephemeral,
 		AuthKey:   strings.TrimSpace(os.Getenv("TS_AUTHKEY")),
 		Logf:      func(string, ...any) {},
 		UserLogf:  userLogf,

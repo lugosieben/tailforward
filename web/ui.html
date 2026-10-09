@@ -136,6 +136,7 @@
 <div id="auth"></div>
 <div id="reauthRow" style="display:none;margin-bottom:12px">
     <button class="small" id="reauth">reauth</button>
+    <label class="hint" style="margin-left:8px"><input id="ephemeral" type="checkbox" checked> ephemeral</label>
 </div>
 <ul id="rules"></ul>
 <form id="add">
@@ -158,8 +159,10 @@
     const hintEl = $("hint")
     const reauthRow = $("reauthRow")
     const reauthBtn = $("reauth");
+    const ephemeralBox = $("ephemeral");
     let lastAuth = null
     let lastFrom = "";
+    let modeBusy = false;
 
     const api = async (path, body) => {
         const r = await fetch(path, body ? {
@@ -200,6 +203,8 @@
             const s = await api("/api/state");
             statusEl.textContent = "tailnet: " + s.status;
             reauthRow.style.display = /^(starting|connecting)/.test(s.status) ? "none" : "block";
+            if (!modeBusy) ephemeralBox.checked = s.ephemeral !== false;
+            reauthBtn.textContent = ephemeralBox.checked ? "reauth" : "logout";
             renderAuth(s.authURL || "");
             if (!s.authURL && s.status === "login needed" && !lastAuth) {
                 authEl.style.display = "block";
@@ -266,6 +271,7 @@
     };
 
     reauthBtn.onclick = async () => {
+        if (!ephemeralBox.checked && !confirm("Log out? This will not remove the device from your tailnet")) return;
         reauthBtn.disabled = true;
         try {
             await api("/api/reauth", {});
@@ -274,6 +280,28 @@
             /already in progress/.test(err.message) ? await refresh() : alert(err.message);
         } finally {
             reauthBtn.disabled = false;
+        }
+    };
+
+    ephemeralBox.onchange = async () => {
+        const want = ephemeralBox.checked;
+        if (!confirm(want
+            ? "Are you sure you want to switch to ephemeral? This logs you out immediately"
+            : "Are you sure you want to switch to persistent? This logs you out immediately")) {
+            ephemeralBox.checked = !want;
+            return;
+        }
+        modeBusy = true;
+        ephemeralBox.disabled = true;
+        try {
+            await api("/api/mode", {ephemeral: want});
+            await refresh();
+        } catch (err) {
+            ephemeralBox.checked = !want;
+            alert(err.message);
+        } finally {
+            ephemeralBox.disabled = false;
+            modeBusy = false;
         }
     };
 

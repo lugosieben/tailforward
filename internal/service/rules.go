@@ -11,6 +11,7 @@ func (s *Service) Restore() {
 	loaded := store.Load(s.paths.ConfigFile)
 	s.mu.Lock()
 	s.rules = append([]domain.Rule{}, loaded...)
+	s.ephemeral = store.LoadEphemeral(s.paths.SettingsFile)
 	s.mu.Unlock()
 }
 

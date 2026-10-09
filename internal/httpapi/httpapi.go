@@ -27,10 +27,15 @@ type ruleEntry struct {
 }
 
 type stateResponse struct {
-	Status  string      `json:"status"`
-	AuthURL string      `json:"authURL"`
-	Rules   []ruleEntry `json:"rules"`
-	Devices []string    `json:"devices"`
+	Status    string      `json:"status"`
+	AuthURL   string      `json:"authURL"`
+	Rules     []ruleEntry `json:"rules"`
+	Devices   []string    `json:"devices"`
+	Ephemeral bool        `json:"ephemeral"`
+}
+
+type modeRequest struct {
+	Ephemeral *bool `json:"ephemeral"`
 }
 
 type Server struct {
@@ -46,6 +51,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/state", s.handleState)
 	mux.HandleFunc("/api/rules", s.handleRules)
 	mux.HandleFunc("/api/reauth", s.handleReauth)
+	mux.HandleFunc("/api/mode", s.handleMode)
 	return mux
 }
 
@@ -80,7 +86,7 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(stateResponse{Status: status, AuthURL: authURL, Rules: entries, Devices: devices})
+	_ = json.NewEncoder(w).Encode(stateResponse{Status: status, AuthURL: authURL, Rules: entries, Devices: devices, Ephemeral: s.service.Ephemeral()})
 }
 
 func (s *Server) handleRules(w http.ResponseWriter, r *http.Request) {
@@ -107,6 +113,33 @@ func (s *Server) handleRules(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = io.WriteString(w, `{"ok":true}`)
+}
+
+func (s *Server) handleMode(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", http.StatusMethodNotAllowed)
+		return
+	}
+	var req modeRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
+		http.Error(w, "bad json", http.StatusBadRequest)
+		return
+	}
+	if req.Ephemeral == nil {
+		http.Error(w, "missing ephemeral", http.StatusBadRequest)
+		return
+	}
+	changed, err := s.service.SetEphemeral(*req.Ephemeral)
+	if err != nil {
+		if errors.Is(err, service.ErrReauthInProgress) {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "ephemeral": s.service.Ephemeral(), "changed": changed})
 }
 
 func (s *Server) handleReauth(w http.ResponseWriter, r *http.Request) {

@@ -19,13 +19,15 @@ type Service struct {
 	tracker   *state.Tracker
 	fwd       *forward.Manager
 	rules     []domain.Rule
+	ephemeral bool
 	server    *tailnet.Server
+	cancel    context.CancelFunc
 	reauthing bool
 	restart   chan struct{}
 }
 
 func New(paths config.Paths, tracker *state.Tracker) *Service {
-	s := &Service{paths: paths, tracker: tracker, restart: make(chan struct{}, 1)}
+	s := &Service{paths: paths, tracker: tracker, ephemeral: true, restart: make(chan struct{}, 1)}
 	s.fwd = forward.New(s.dial)
 	return s
 }
@@ -37,6 +39,12 @@ func (s *Service) Rules() []domain.Rule {
 }
 
 func (s *Service) Status() (string, string, []string) { return s.tracker.Snapshot() }
+
+func (s *Service) Ephemeral() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.ephemeral
+}
 
 func (s *Service) Health(r domain.Rule) (int, int, string) { return s.fwd.Health(r) }
 

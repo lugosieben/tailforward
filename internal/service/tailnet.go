@@ -12,7 +12,12 @@ import (
 func (s *Service) Loop() {
 restartOuter:
 	for {
-		srv := tailnet.New(s.paths.StateDir, s.userLogf)
+		s.mu.Lock()
+		ephemeral := s.ephemeral
+		ctx, cancel := context.WithCancel(context.Background())
+		s.cancel = cancel
+		s.mu.Unlock()
+		srv := tailnet.New(s.paths.StateDir, ephemeral, s.userLogf)
 		if err := srv.Start(); err != nil {
 			s.tracker.SetStatus("tailnet error: " + err.Error())
 			log.Printf("tailnet start failed: %v", err)
@@ -27,17 +32,17 @@ restartOuter:
 		s.server = srv
 		s.mu.Unlock()
 		s.tracker.SetStatus("connecting to tailnet...")
-		go s.watchEvents(srv)
-		go s.pollDevices(srv)
+		go s.watchEvents(ctx, srv)
+		go s.pollDevices(ctx, srv)
 
 		for attempt := 0; ; attempt++ {
 			select {
 			case <-s.restart:
-				_ = srv.Close()
+				closeTimeout(srv, 10*time.Second)
 				continue restartOuter
 			default:
 			}
-			st, err := srv.Up(context.Background())
+			st, err := srv.Up(ctx)
 			if err == nil {
 				s.tracker.SetStatus("connected")
 				s.tracker.SetAuthURL("")
@@ -48,8 +53,12 @@ restartOuter:
 				go s.refreshDevices(srv)
 				break
 			}
-			s.tracker.SetStatus("tailnet error: " + err.Error())
-			if st != nil && st.AuthURL != "" {
+			if ctx.Err() != nil {
+				log.Print("tailnet Up superseded by restart")
+			} else {
+				s.tracker.SetStatus("tailnet error: " + err.Error())
+			}
+			if st != nil && st.AuthURL != "" && ctx.Err() == nil {
 				if s.tracker.SetAuthURL(st.AuthURL) {
 					log.Printf("login URL: %s", st.AuthURL)
 				}
@@ -58,7 +67,7 @@ restartOuter:
 			wait := time.Duration(min(attempt, 5)) * 10 * time.Second
 			select {
 			case <-s.restart:
-				_ = srv.Close()
+				closeTimeout(srv, 10*time.Second)
 				continue restartOuter
 			case <-time.After(wait):
 			}
@@ -66,7 +75,7 @@ restartOuter:
 		}
 
 		<-s.restart
-		_ = srv.Close()
+		closeTimeout(srv, 10*time.Second)
 	}
 }
 
@@ -85,9 +94,15 @@ func (s *Service) userLogf(format string, args ...any) {
 	log.Print(text)
 }
 
-func (s *Service) watchEvents(srv *tailnet.Server) {
-	if err := srv.Watch(context.Background(), s.applyEvent); err != nil {
-		if s.current() == srv {
+func (s *Service) watchEvents(ctx context.Context, srv *tailnet.Server) {
+	onEvent := func(e tailnet.Event) {
+		if s.current() != srv {
+			return
+		}
+		s.applyEvent(e)
+	}
+	if err := srv.Watch(ctx, onEvent); err != nil {
+		if s.current() == srv && ctx.Err() == nil {
 			log.Printf("tailnet bus watch failed: %v", err)
 		}
 	}
@@ -132,15 +147,19 @@ func (s *Service) refreshDevices(srv *tailnet.Server) {
 	s.tracker.SetDevices(names)
 }
 
-func (s *Service) pollDevices(srv *tailnet.Server) {
+func (s *Service) pollDevices(ctx context.Context, srv *tailnet.Server) {
 	s.refreshDevices(srv)
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
 	for {
-		<-ticker.C
-		if s.current() != srv {
+		select {
+		case <-ctx.Done():
 			return
+		case <-ticker.C:
+			if s.current() != srv {
+				return
+			}
+			s.refreshDevices(srv)
 		}
-		s.refreshDevices(srv)
 	}
 }
