@@ -11,15 +11,18 @@ import (
 	"tailscale.com/ipn"
 	"tailscale.com/ipn/ipnstate"
 	"tailscale.com/tsnet"
+
+	"tailforward/internal/domain"
 )
 
 var loginPattern = regexp.MustCompile(`https://login\.tailscale\.com/a/[0-9a-f]+`)
 
 type Event struct {
-	Connected   bool
-	LoginNeeded bool
-	Starting    bool
-	AuthURL     string
+	Connected      bool
+	LoginNeeded    bool
+	ApprovalNeeded bool
+	Starting       bool
+	AuthURL        string
 }
 
 type Server struct {
@@ -42,31 +45,31 @@ func LoginURL(text string) (string, bool) {
 	return m, m != ""
 }
 
-func DeviceNames(st *ipnstate.Status) []string {
+func Devices(st *ipnstate.Status) []domain.Device {
 	if st == nil {
 		return nil
 	}
 	seen := map[string]bool{}
-	var out []string
-	add := func(host, dns string) {
+	var out []domain.Device
+	add := func(host, dns string, online bool) {
 		n := host
 		if n == "" {
 			n = strings.TrimSuffix(dns, ".")
 		}
 		if n != "" && !seen[n] {
 			seen[n] = true
-			out = append(out, n)
+			out = append(out, domain.Device{Name: n, Online: online})
 		}
 	}
 	if st.Self != nil {
-		add(st.Self.HostName, st.Self.DNSName)
+		add(st.Self.HostName, st.Self.DNSName, st.Self.Online)
 	}
 	for _, p := range st.Peer {
 		if p != nil {
-			add(p.HostName, p.DNSName)
+			add(p.HostName, p.DNSName, p.Online)
 		}
 	}
-	sort.Strings(out)
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
 }
 
@@ -93,7 +96,7 @@ func (s *Server) Logout(ctx context.Context) error {
 	return client.Logout(ctx)
 }
 
-func (s *Server) DeviceNames(ctx context.Context) ([]string, error) {
+func (s *Server) Devices(ctx context.Context) ([]domain.Device, error) {
 	client, err := s.inner.LocalClient()
 	if err != nil {
 		return nil, err
@@ -102,7 +105,7 @@ func (s *Server) DeviceNames(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return DeviceNames(st), nil
+	return Devices(st), nil
 }
 
 func (s *Server) Watch(ctx context.Context, onEvent func(Event)) error {
@@ -127,8 +130,11 @@ func (s *Server) Watch(ctx context.Context, onEvent func(Event)) error {
 			case ipn.Running:
 				e.Connected = true
 				empty = false
-			case ipn.NeedsLogin, ipn.NeedsMachineAuth:
+			case ipn.NeedsLogin:
 				e.LoginNeeded = true
+				empty = false
+			case ipn.NeedsMachineAuth:
+				e.ApprovalNeeded = true
 				empty = false
 			case ipn.Starting:
 				e.Starting = true

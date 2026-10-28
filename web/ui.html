@@ -71,6 +71,24 @@
             flex: 1
         }
 
+        .dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 6px
+        }
+
+        /*noinspection CssUnusedSymbol*/
+        .dot.on {
+            background: #2a2
+        }
+
+        /*noinspection CssUnusedSymbol*/
+        .dot.off {
+            background: #c33
+        }
+
         .err {
             color: #c33;
             font-size: 12px
@@ -145,7 +163,8 @@
     <input inputmode="numeric" name="rs" placeholder="from" required>
     <input inputmode="numeric" name="re" placeholder="to">
     <input inputmode="numeric" name="ls" placeholder="local" required>
-    <button class="primary">add</button>
+    <button class="primary" id="addBtn">add</button>
+    <button type="button" class="small" id="cancelEdit" hidden>cancel</button>
 </form>
 <p class="hint" id="hint"></p>
 <script src="qrcode.min.js"></script>
@@ -160,8 +179,13 @@
     const reauthRow = $("reauthRow")
     const reauthBtn = $("reauth");
     const ephemeralBox = $("ephemeral");
+    const addBtn = $("addBtn");
+    const cancelEditBtn = $("cancelEdit");
     let lastAuth = null
     let lastFrom = "";
+    let lastDevices = "";
+    let lastRules = [];
+    let editing = null;
     let modeBusy = false;
 
     const api = async (path, body) => {
@@ -173,7 +197,9 @@
         if (!r.ok) throw new Error(await r.text());
         return r.json();
     };
-    const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const esc = (s) => String(s)
+        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
 
     function renderAuth(url) {
         if (url === lastAuth) return;
@@ -194,8 +220,31 @@
         } catch {
             qr = "QR unavailable";
         }
-        authEl.innerHTML = "";
         authEl.innerHTML = `<div id="authBody"><div id="qr">${qr}</div><div>Scan or open:<br><a id="authLink" href="${esc(url)}" target="_blank" rel="noopener">${esc(url)}</a></div></div>`;
+    }
+
+    function renderAuthState(s) {
+        if (s.authURL) {
+            renderAuth(s.authURL);
+        } else if (s.status === "login needed") {
+            renderAuth("");
+            authEl.style.display = "block";
+            authEl.textContent = "Waiting for the login link…";
+        } else if (s.status === "approval needed") {
+            renderAuth("");
+            authEl.style.display = "block";
+            authEl.textContent = "Waiting for approval in the Tailscale admin console…";
+        } else {
+            renderAuth("");
+        }
+    }
+
+    const lastDevicesMap = new Map();
+
+    function dotFor(host) {
+        const online = lastDevicesMap.get(host);
+        if (online === undefined) return "";
+        return `<span class="dot ${online ? "on" : "off"}" title="device ${online ? "online" : "offline"}"></span>`;
     }
 
     async function refresh() {
@@ -205,30 +254,67 @@
             reauthRow.style.display = /^(starting|connecting)/.test(s.status) ? "none" : "block";
             if (!modeBusy) ephemeralBox.checked = s.ephemeral !== false;
             reauthBtn.textContent = ephemeralBox.checked ? "reauth" : "logout";
-            renderAuth(s.authURL || "");
-            if (!s.authURL && s.status === "login needed" && !lastAuth) {
-                authEl.style.display = "block";
-                authEl.textContent = "Waiting for the login link…";
+            renderAuthState(s);
+            const names = (s.devices || []).map(d => d.name).join("\u0000");
+            if (names !== lastDevices) {
+                lastDevices = names;
+                hostsEl.innerHTML = (s.devices || []).map(d => `<option value="${esc(d.name)}">`).join("");
             }
-            hostsEl.innerHTML = (s.devices || []).map(n => `<option value="${esc(n)}">`).join("");
-            rulesEl.innerHTML = (s.rules || []).map(r =>
-                `<li><code>${esc(r.label)}${r.total > 1 ? ` <span class="hint">${r.active}/${r.total}</span>` : ""}</code>` +
+            lastRules = s.rules || [];
+            lastDevicesMap.clear();
+            for (const d of s.devices || []) lastDevicesMap.set(d.name, d.online);
+            rulesEl.innerHTML = lastRules.map(r =>
+                `<li><code>${dotFor(r.host)}${esc(r.label)}${r.total > 1 ? ` <span class="hint">${r.active}/${r.total}</span>` : ""}</code>` +
                 (r.error ? `<span class="err">${esc(r.error)}</span>` : "") +
-                `<button class="small" data-ls="${r.localStart}">del</button></li>`).join("");
+                `<button class="small" data-ls="${r.localStart}" data-act="edit">edit</button> ` +
+                `<button class="small" data-ls="${r.localStart}" data-act="del">del</button></li>`).join("");
         } catch (e) {
             statusEl.textContent = "UI error: " + e;
         }
     }
 
     rulesEl.onclick = async (e) => {
-        const ls = e.target?.dataset?.ls;
-        if (!ls) return;
+        const btn = e.target.closest("button[data-ls]");
+        if (!btn) return;
+        const ls = +btn.dataset.ls;
+        if (btn.dataset.act === "edit") {
+            const r = lastRules.find(x => x.localStart === ls);
+            if (r) startEdit(r);
+            return;
+        }
         try {
-            await api("/api/rules", {action: "delete", localStart: Number(ls)});
+            await api("/api/rules", {action: "delete", localStart: ls});
         } catch (err) {
             alert(err.message);
         }
+        if (editing === ls) endEdit();
         await refresh();
+    };
+
+    function startEdit(r) {
+        editing = r.localStart;
+        form.host.value = r.host;
+        form.rs.value = r.remoteStart;
+        form.re.value = r.remoteEnd;
+        form.ls.value = r.localStart;
+        lastFrom = String(r.remoteStart);
+        addBtn.textContent = "update";
+        cancelEditBtn.hidden = false;
+        hint();
+        form.host.focus();
+    }
+
+    function endEdit() {
+        editing = null;
+        form.reset();
+        lastFrom = "";
+        addBtn.textContent = "add";
+        cancelEditBtn.hidden = true;
+        hint();
+    }
+
+    cancelEditBtn.onclick = () => {
+        if (editing !== null) endEdit();
     };
 
     function hint() {
@@ -253,22 +339,24 @@
     form.onsubmit = async (e) => {
         e.preventDefault();
         const rs = +form.rs.value, re = +form.re.value || rs;
+        const body = {
+            action: editing !== null ? "update" : "add",
+            host: form.host.value.trim(),
+            remoteStart: rs,
+            remoteEnd: re,
+            localStart: +form.ls.value
+        };
+        if (editing !== null) body.oldLocalStart = editing;
         try {
-            await api("/api/rules", {
-                action: "add",
-                host: form.host.value.trim(),
-                remoteStart: rs,
-                remoteEnd: re,
-                localStart: +form.ls.value
-            });
-            form.reset();
-            lastFrom = "";
-            hint();
+            await api("/api/rules", body);
+            endEdit();
             await refresh();
         } catch (err) {
             alert(err.message);
         }
     };
+
+    form.onreset = () => { if (editing !== null) endEdit(); };
 
     reauthBtn.onclick = async () => {
         if (!ephemeralBox.checked && !confirm("Log out? This will not remove the device from your tailnet")) return;

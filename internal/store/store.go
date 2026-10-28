@@ -19,12 +19,18 @@ func Load(path string) []domain.Rule {
 		return nil
 	}
 	var kept []domain.Rule
+	seen := map[int]bool{}
 	for _, c := range raw {
+		if seen[c.LocalStart] {
+			log.Printf("dropping duplicate saved rule %s", c.Label())
+			continue
+		}
 		r, err := domain.Validate(c.Host, c.RemoteStart, c.RemoteEnd, c.LocalStart, kept)
 		if err != nil {
 			log.Printf("dropping invalid saved rule %s: %s", c.Label(), err)
 			continue
 		}
+		seen[r.LocalStart] = true
 		kept = append(kept, r)
 	}
 	log.Printf("loaded %d rule(s) from %s", len(kept), path)

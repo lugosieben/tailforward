@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"log"
 
 	"tailforward/internal/domain"
@@ -37,14 +38,48 @@ func (s *Service) Add(host string, rs, re, ls int) (domain.Rule, error) {
 	snap := append([]domain.Rule{}, s.rules...)
 	s.mu.Unlock()
 
+	s.fwd.Sync(snap)
+	store.Save(s.paths.ConfigFile, snap)
 	if replaced != nil {
-		s.fwd.Stop(*replaced)
 		log.Printf("rule replaced: %s (was %s)", r.Label(), replaced.Label())
 	} else {
 		log.Printf("rule added: %s", r.Label())
 	}
+	return r, nil
+}
+
+func (s *Service) Update(oldLS int, host string, rs, re, ls int) (domain.Rule, error) {
+	s.mu.Lock()
+	idx := -1
+	for i, o := range s.rules {
+		if o.LocalStart == oldLS {
+			idx = i
+			break
+		}
+	}
+	if idx == -1 {
+		s.mu.Unlock()
+		return domain.Rule{}, errors.New("no rule with that local start port")
+	}
+	old := s.rules[idx]
+	others := make([]domain.Rule, 0, len(s.rules)-1)
+	for i, o := range s.rules {
+		if i != idx {
+			others = append(others, o)
+		}
+	}
+	r, err := domain.Validate(host, rs, re, ls, others)
+	if err != nil {
+		s.mu.Unlock()
+		return domain.Rule{}, err
+	}
+	s.rules[idx] = r
+	snap := append([]domain.Rule{}, s.rules...)
+	s.mu.Unlock()
+
+	s.fwd.Sync(snap)
 	store.Save(s.paths.ConfigFile, snap)
-	s.fwd.Start(r)
+	log.Printf("rule updated: %s (was %s)", r.Label(), old.Label())
 	return r, nil
 }
 
@@ -62,9 +97,9 @@ func (s *Service) Delete(ls int) {
 	snap := append([]domain.Rule{}, s.rules...)
 	s.mu.Unlock()
 
+	s.fwd.Sync(snap)
+	store.Save(s.paths.ConfigFile, snap)
 	if removed != nil {
-		s.fwd.Stop(*removed)
 		log.Printf("rule deleted: %s", removed.Label())
 	}
-	store.Save(s.paths.ConfigFile, snap)
 }

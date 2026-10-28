@@ -40,7 +40,9 @@ func (s *Service) restartTailnet(old *tailnet.Server, reason string) {
 		cancel()
 		closeTimeout(old, 10*time.Second)
 	}
-	_ = os.RemoveAll(s.paths.StateDir)
+	if err := os.RemoveAll(s.paths.StateDir); err != nil {
+		log.Printf("could not remove %s (the old server may still be shutting down): %v", s.paths.StateDir, err)
+	}
 	s.tracker.SetStatus("connecting to tailnet...")
 	s.tracker.SetAuthURL("")
 	select {

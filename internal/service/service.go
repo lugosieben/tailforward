@@ -38,7 +38,7 @@ func (s *Service) Rules() []domain.Rule {
 	return append([]domain.Rule{}, s.rules...)
 }
 
-func (s *Service) Status() (string, string, []string) { return s.tracker.Snapshot() }
+func (s *Service) Status() (string, string, []domain.Device) { return s.tracker.Snapshot() }
 
 func (s *Service) Ephemeral() bool {
 	s.mu.Lock()

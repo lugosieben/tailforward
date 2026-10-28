@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"time"
 
@@ -29,14 +30,17 @@ func main() {
 	go svc.Loop()
 
 	addr := fmt.Sprintf("127.0.0.1:%d", domain.DashboardPort)
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		log.Fatal(err)
+	}
 	if !*noBrowser {
 		go browser.Open("http://" + addr + "/")
 	}
 	log.Printf("tailforward on http://%s", addr)
 	server := &http.Server{
-		Addr:              addr,
 		Handler:           httpapi.New(svc).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
-	log.Fatal(server.ListenAndServe())
+	log.Fatal(server.Serve(ln))
 }

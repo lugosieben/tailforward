@@ -6,32 +6,37 @@ import (
 	"io"
 	"net/http"
 
+	"tailforward/internal/domain"
 	"tailforward/internal/service"
 	"tailforward/web"
 )
 
 type ruleRequest struct {
-	Action      string `json:"action"`
+	Action        string `json:"action"`
+	Host          string `json:"host"`
+	RemoteStart   int    `json:"remoteStart"`
+	RemoteEnd     int    `json:"remoteEnd"`
+	LocalStart    int    `json:"localStart"`
+	OldLocalStart int    `json:"oldLocalStart"`
+}
+
+type ruleEntry struct {
+	Label       string `json:"label"`
 	Host        string `json:"host"`
 	RemoteStart int    `json:"remoteStart"`
 	RemoteEnd   int    `json:"remoteEnd"`
 	LocalStart  int    `json:"localStart"`
-}
-
-type ruleEntry struct {
-	Label      string `json:"label"`
-	LocalStart int    `json:"localStart"`
-	Active     int    `json:"active"`
-	Total      int    `json:"total"`
-	Error      string `json:"error,omitempty"`
+	Active      int    `json:"active"`
+	Total       int    `json:"total"`
+	Error       string `json:"error,omitempty"`
 }
 
 type stateResponse struct {
-	Status    string      `json:"status"`
-	AuthURL   string      `json:"authURL"`
-	Rules     []ruleEntry `json:"rules"`
-	Devices   []string    `json:"devices"`
-	Ephemeral bool        `json:"ephemeral"`
+	Status    string          `json:"status"`
+	AuthURL   string          `json:"authURL"`
+	Rules     []ruleEntry     `json:"rules"`
+	Devices   []domain.Device `json:"devices"`
+	Ephemeral bool            `json:"ephemeral"`
 }
 
 type modeRequest struct {
@@ -77,11 +82,14 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 	for _, rule := range s.service.Rules() {
 		active, total, failure := s.service.Health(rule)
 		entries = append(entries, ruleEntry{
-			Label:      rule.Label(),
-			LocalStart: rule.LocalStart,
-			Active:     active,
-			Total:      total,
-			Error:      failure,
+			Label:       rule.Label(),
+			Host:        rule.Host,
+			RemoteStart: rule.RemoteStart,
+			RemoteEnd:   rule.RemoteEnd,
+			LocalStart:  rule.LocalStart,
+			Active:      active,
+			Total:       total,
+			Error:       failure,
 		})
 	}
 	w.Header().Set("Cache-Control", "no-store")
@@ -102,6 +110,11 @@ func (s *Server) handleRules(w http.ResponseWriter, r *http.Request) {
 	switch req.Action {
 	case "add":
 		if _, err := s.service.Add(req.Host, req.RemoteStart, req.RemoteEnd, req.LocalStart); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	case "update":
+		if _, err := s.service.Update(req.OldLocalStart, req.Host, req.RemoteStart, req.RemoteEnd, req.LocalStart); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}

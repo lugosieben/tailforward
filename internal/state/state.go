@@ -1,12 +1,16 @@
 package state
 
-import "sync"
+import (
+	"sync"
+
+	"tailforward/internal/domain"
+)
 
 type Tracker struct {
 	mu      sync.Mutex
 	status  string
 	authURL string
-	devices []string
+	devices []domain.Device
 }
 
 func New(initial string) *Tracker { return &Tracker{status: initial} }
@@ -31,14 +35,14 @@ func (t *Tracker) AuthURL() string {
 	return t.authURL
 }
 
-func (t *Tracker) SetDevices(d []string) {
+func (t *Tracker) SetDevices(d []domain.Device) {
 	t.mu.Lock()
-	t.devices = append([]string{}, d...)
+	t.devices = append([]domain.Device{}, d...)
 	t.mu.Unlock()
 }
 
-func (t *Tracker) Snapshot() (string, string, []string) {
+func (t *Tracker) Snapshot() (string, string, []domain.Device) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return t.status, t.authURL, append([]string{}, t.devices...)
+	return t.status, t.authURL, append([]domain.Device{}, t.devices...)
 }

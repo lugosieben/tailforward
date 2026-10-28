@@ -47,9 +47,7 @@ restartOuter:
 				s.tracker.SetStatus("connected")
 				s.tracker.SetAuthURL("")
 				log.Print("tailnet connected")
-				for _, r := range s.Rules() {
-					s.fwd.Start(r)
-				}
+				s.fwd.Sync(s.Rules())
 				go s.refreshDevices(srv)
 				break
 			}
@@ -64,7 +62,7 @@ restartOuter:
 				}
 			}
 			log.Printf("tailnet Up failed (attempt %d): %v", attempt+1, err)
-			wait := time.Duration(min(attempt, 5)) * 10 * time.Second
+			wait := time.Duration(min(attempt+1, 5)) * 10 * time.Second
 			select {
 			case <-s.restart:
 				closeTimeout(srv, 10*time.Second)
@@ -120,6 +118,9 @@ func (s *Service) applyEvent(e tailnet.Event) {
 	if e.LoginNeeded {
 		s.tracker.SetStatus("login needed")
 	}
+	if e.ApprovalNeeded {
+		s.tracker.SetStatus("approval needed")
+	}
 	if e.Starting {
 		s.tracker.SetStatus("connecting to tailnet...")
 	}
@@ -137,14 +138,14 @@ func (s *Service) refreshDevices(srv *tailnet.Server) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	names, err := srv.DeviceNames(ctx)
+	devices, err := srv.Devices(ctx)
 	if err != nil {
 		return
 	}
 	if s.current() != srv {
 		return
 	}
-	s.tracker.SetDevices(names)
+	s.tracker.SetDevices(devices)
 }
 
 func (s *Service) pollDevices(ctx context.Context, srv *tailnet.Server) {

@@ -20,6 +20,11 @@ type Rule struct {
 	LocalStart  int    `json:"localStart"`
 }
 
+type Device struct {
+	Name   string `json:"name"`
+	Online bool   `json:"online"`
+}
+
 func (r Rule) LocalEnd() int { return r.LocalStart + r.RemoteEnd - r.RemoteStart }
 
 func (r Rule) Label() string {
