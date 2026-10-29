@@ -61,6 +61,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleRoot)
 	mux.HandleFunc("/qrcode.min.js", s.handleScript)
+	mux.HandleFunc("/favicon.svg", s.handleFavicon)
 	mux.HandleFunc("/api/state", s.handleState)
 	mux.HandleFunc("/api/rules", s.handleRules)
 	mux.HandleFunc("/api/reauth", s.handleReauth)
@@ -79,6 +80,12 @@ func (s *Server) handleScript(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	_, _ = io.WriteString(w, web.QR)
+}
+
+func (s *Server) handleFavicon(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "image/svg+xml")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = io.WriteString(w, web.Favicon)
 }
 
 func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {

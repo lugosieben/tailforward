@@ -4,6 +4,8 @@
 <head>
     <meta charset="utf-8">
     <meta content="width=device-width, initial-scale=1" name="viewport">
+    <!--suppress HtmlUnknownTarget -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <title>tailforward</title>
     <style>
         * {
@@ -18,8 +20,17 @@
         }
 
         h1 {
+            display: flex;
+            align-items: center;
+            gap: 8px;
             font-size: 18px;
             margin: 0 0 2px
+        }
+
+        h1 img {
+            width: 28px;
+            height: 28px;
+            border-radius: 6px
         }
 
         #status {
@@ -172,7 +183,7 @@
     </style>
 </head>
 <body>
-<h1>tailforward</h1>
+<h1><!--suppress HtmlUnknownTarget --><img src="/favicon.svg" alt="">tailforward</h1>
 <div id="status">starting…</div>
 <div id="auth"></div>
 <div id="keyBox">
