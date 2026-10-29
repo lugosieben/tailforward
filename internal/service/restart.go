@@ -45,8 +45,28 @@ func (s *Service) restartTailnet(old *tailnet.Server, reason string) {
 	}
 	s.tracker.SetStatus("connecting to tailnet...")
 	s.tracker.SetAuthURL("")
+	s.requestRestart()
+}
+
+func (s *Service) requestRestart() {
+	s.mu.Lock()
+	s.restartPending = true
+	s.mu.Unlock()
 	select {
 	case s.restart <- struct{}{}:
 	default:
+	}
+}
+
+func (s *Service) consumeRestart() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	pending := s.restartPending
+	s.restartPending = false
+	select {
+	case <-s.restart:
+		return true
+	default:
+		return pending
 	}
 }

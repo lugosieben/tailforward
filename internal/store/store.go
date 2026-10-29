@@ -2,15 +2,20 @@ package store
 
 import (
 	"encoding/json"
+	"errors"
+	"io/fs"
 	"log"
-	"os"
 
+	"tailforward/internal/crypt"
 	"tailforward/internal/domain"
 )
 
-func Load(path string) []domain.Rule {
-	data, err := os.ReadFile(path)
+func Load(path, key string) []domain.Rule {
+	data, err := crypt.ReadFile(path, key)
 	if err != nil {
+		if !errors.Is(err, crypt.ErrEncrypted) && !errors.Is(err, fs.ErrNotExist) {
+			log.Printf("ignoring unreadable %s: %v", path, err)
+		}
 		return nil
 	}
 	var raw []domain.Rule
@@ -37,9 +42,9 @@ func Load(path string) []domain.Rule {
 	return kept
 }
 
-func Save(path string, rules []domain.Rule) {
+func Save(path string, rules []domain.Rule, key string) {
 	data, _ := json.MarshalIndent(rules, "", "  ")
-	if err := os.WriteFile(path, data, 0600); err != nil {
+	if err := crypt.WriteFile(path, data, key); err != nil {
 		log.Printf("cannot save %s: %v", path, err)
 	}
 }

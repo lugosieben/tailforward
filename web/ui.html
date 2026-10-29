@@ -141,6 +141,29 @@
             color: #888
         }
 
+        #keyBox {
+            display: none;
+            background: #eef4ff;
+            border: 1px solid #7aa2f7;
+            border-radius: 6px;
+            padding: 10px 12px;
+            margin-bottom: 12px
+        }
+
+        #keyBox p {
+            margin: 0 0 8px;
+            font-size: 13px
+        }
+
+        #keyBox form {
+            align-items: center
+        }
+
+        #keyBox input[type=password] {
+            flex: 1 1 140px;
+            min-width: 0
+        }
+
         code {
             background: #f2f2f2;
             padding: 1px 5px;
@@ -152,9 +175,22 @@
 <h1>tailforward</h1>
 <div id="status">starting…</div>
 <div id="auth"></div>
+<div id="keyBox">
+    <p id="keyMsg">Settings are encrypted. Enter the key to unlock.</p>
+    <form id="keyForm">
+        <input id="keyOld" autocomplete="off" name="oldKey" type="password" placeholder="current key" hidden>
+        <input id="keyNew" autocomplete="off" name="key" type="password" placeholder="key" required>
+        <button class="primary" id="keyGo" type="submit">unlock</button>
+        <button class="small" id="keyCancel" type="button" hidden>cancel</button>
+    </form>
+</div>
 <div id="reauthRow" style="display:none;margin-bottom:12px">
-    <button class="small" id="reauth">reauth</button>
-    <label class="hint" style="margin-left:8px"><input id="ephemeral" type="checkbox" checked> ephemeral</label>
+    <button class="small" id="reauth">reauth ts</button>
+    <button class="small" id="encryptBtn" style="margin-left:8px" hidden>encrypt</button>
+    <button class="small" id="changeKeyBtn" style="margin-left:8px" hidden>mod key</button>
+    <button class="small" id="removeKeyBtn" style="margin-left:8px" hidden>rm key</button>
+    <button class="small" id="lockBtn" style="margin-left:8px" hidden>lock</button>
+    <label class="hint" style="margin-left:8px"><input id="ephemeral" type="checkbox" checked>ephemeral</label>
 </div>
 <ul id="rules"></ul>
 <form id="add">
@@ -181,6 +217,18 @@
     const ephemeralBox = $("ephemeral");
     const addBtn = $("addBtn");
     const cancelEditBtn = $("cancelEdit");
+    const keyBox = $("keyBox");
+    const keyMsg = $("keyMsg");
+    const keyForm = $("keyForm");
+    const keyOld = $("keyOld");
+    const keyNew = $("keyNew");
+    const keyGo = $("keyGo");
+    const keyCancel = $("keyCancel");
+    const lockBtn = $("lockBtn");
+    let keyMode = null; // unlock set change remove
+    const encryptBtn = $("encryptBtn");
+    const changeKeyBtn = $("changeKeyBtn");
+    const removeKeyBtn = $("removeKeyBtn");
     let lastAuth = null
     let lastFrom = "";
     let lastDevices = "";
@@ -251,9 +299,20 @@
         try {
             const s = await api("/api/state");
             statusEl.textContent = "tailnet: " + s.status;
-            reauthRow.style.display = /^(starting|connecting)/.test(s.status) ? "none" : "block";
+            if (s.locked) {
+                if (keyMode !== "unlock") openKeyDialog("unlock");
+            } else if (keyMode === "unlock") {
+                keyBox.style.display = "none";
+                keyMode = null;
+            }
+            const unlocked = !s.locked;
+            reauthRow.style.display = unlocked && !/^(starting|connecting)/.test(s.status) ? "block" : "none";
+            lockBtn.hidden = !s.encrypted;
+            encryptBtn.hidden = s.encrypted;
+            changeKeyBtn.hidden = !s.encrypted;
+            removeKeyBtn.hidden = !s.encrypted;
             if (!modeBusy) ephemeralBox.checked = s.ephemeral !== false;
-            reauthBtn.textContent = ephemeralBox.checked ? "reauth" : "logout";
+            reauthBtn.textContent = ephemeralBox.checked ? "reauth ts" : "logout ts";
             renderAuthState(s);
             const names = (s.devices || []).map(d => d.name).join("\u0000");
             if (names !== lastDevices) {
@@ -392,6 +451,67 @@
             modeBusy = false;
         }
     };
+
+    const keyDialogs = {
+        unlock: {msg: "Settings are encrypted.", old: false, go: "unlock"},
+        set: {msg: "Choose an encryption key.", old: false, go: "encrypt"},
+        change: {msg: "Enter the current key and the new key.", old: true, go: "change"},
+        remove: {msg: "Enter the key to remove encryption. Everything is stored in plaintext again.", old: false, go: "remove"}
+    };
+
+    function openKeyDialog(mode) {
+        const d = keyDialogs[mode];
+        keyMode = mode;
+        keyMsg.textContent = d.msg;
+        keyOld.hidden = !d.old;
+        keyOld.required = d.old;
+        keyOld.value = "";
+        keyNew.value = "";
+        keyGo.textContent = d.go;
+        keyCancel.hidden = mode === "unlock";
+        keyBox.style.display = "block";
+        (d.old ? keyOld : keyNew).focus();
+    }
+
+    keyForm.onsubmit = async (e) => {
+        e.preventDefault();
+        const body = {action: keyMode, key: keyNew.value};
+        if (keyMode === "change") body.oldKey = keyOld.value;
+        keyGo.disabled = true;
+        try {
+            await api("/api/key", body);
+            keyForm.reset();
+            keyBox.style.display = "none";
+            keyMode = null;
+            await refresh();
+        } catch (err) {
+            alert(err.message);
+        } finally {
+            keyGo.disabled = false;
+        }
+    };
+
+    keyCancel.onclick = () => {
+        keyForm.reset();
+        keyBox.style.display = "none";
+        keyMode = null;
+    };
+
+    lockBtn.onclick = async () => {
+        lockBtn.disabled = true;
+        try {
+            await api("/api/key", {action: "lock"});
+            await refresh();
+        } catch (err) {
+            alert(err.message);
+        } finally {
+            lockBtn.disabled = false;
+        }
+    };
+
+    encryptBtn.onclick = () => openKeyDialog("set");
+    changeKeyBtn.onclick = () => openKeyDialog("change");
+    removeKeyBtn.onclick = () => openKeyDialog("remove");
 
     refresh();
     setInterval(refresh, 2000);

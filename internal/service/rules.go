@@ -3,16 +3,29 @@ package service
 import (
 	"errors"
 	"log"
+	"os"
 
+	"tailforward/internal/crypt"
 	"tailforward/internal/domain"
 	"tailforward/internal/store"
+	"tailforward/internal/tailnet"
 )
 
 func (s *Service) Restore() {
-	loaded := store.Load(s.paths.ConfigFile)
+	s.mu.Lock()
+	key := s.key
+	if data, err := os.ReadFile(tailnet.StateFile(s.paths.StateDir)); err == nil && crypt.IsEncrypted(data) && key == "" {
+		s.locked = true
+		key = ""
+	}
+	s.mu.Unlock()
+	if s.locked {
+		s.tracker.SetStatus("locked")
+	}
+	loaded := store.Load(s.paths.ConfigFile, key)
 	s.mu.Lock()
 	s.rules = append([]domain.Rule{}, loaded...)
-	s.ephemeral = store.LoadEphemeral(s.paths.SettingsFile)
+	s.ephemeral = store.LoadEphemeral(s.paths.SettingsFile, key)
 	s.mu.Unlock()
 }
 
@@ -36,10 +49,11 @@ func (s *Service) Add(host string, rs, re, ls int) (domain.Rule, error) {
 		s.rules = append(s.rules, r)
 	}
 	snap := append([]domain.Rule{}, s.rules...)
+	key := s.key
 	s.mu.Unlock()
 
 	s.fwd.Sync(snap)
-	store.Save(s.paths.ConfigFile, snap)
+	store.Save(s.paths.ConfigFile, snap, key)
 	if replaced != nil {
 		log.Printf("rule replaced: %s (was %s)", r.Label(), replaced.Label())
 	} else {
@@ -75,10 +89,11 @@ func (s *Service) Update(oldLS int, host string, rs, re, ls int) (domain.Rule, e
 	}
 	s.rules[idx] = r
 	snap := append([]domain.Rule{}, s.rules...)
+	key := s.key
 	s.mu.Unlock()
 
 	s.fwd.Sync(snap)
-	store.Save(s.paths.ConfigFile, snap)
+	store.Save(s.paths.ConfigFile, snap, key)
 	log.Printf("rule updated: %s (was %s)", r.Label(), old.Label())
 	return r, nil
 }
@@ -95,10 +110,11 @@ func (s *Service) Delete(ls int) {
 		}
 	}
 	snap := append([]domain.Rule{}, s.rules...)
+	key := s.key
 	s.mu.Unlock()
 
 	s.fwd.Sync(snap)
-	store.Save(s.paths.ConfigFile, snap)
+	store.Save(s.paths.ConfigFile, snap, key)
 	if removed != nil {
 		log.Printf("rule deleted: %s", removed.Label())
 	}

@@ -14,16 +14,19 @@ import (
 )
 
 type Service struct {
-	mu        sync.Mutex
-	paths     config.Paths
-	tracker   *state.Tracker
-	fwd       *forward.Manager
-	rules     []domain.Rule
-	ephemeral bool
-	server    *tailnet.Server
-	cancel    context.CancelFunc
-	reauthing bool
-	restart   chan struct{}
+	mu             sync.Mutex
+	paths          config.Paths
+	tracker        *state.Tracker
+	fwd            *forward.Manager
+	rules          []domain.Rule
+	ephemeral      bool
+	key            string
+	locked         bool
+	server         *tailnet.Server
+	cancel         context.CancelFunc
+	reauthing      bool
+	restart        chan struct{}
+	restartPending bool
 }
 
 func New(paths config.Paths, tracker *state.Tracker) *Service {
@@ -44,6 +47,18 @@ func (s *Service) Ephemeral() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.ephemeral
+}
+
+func (s *Service) Encrypted() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.key != "" || s.locked
+}
+
+func (s *Service) Locked() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.locked
 }
 
 func (s *Service) Health(r domain.Rule) (int, int, string) { return s.fwd.Health(r) }

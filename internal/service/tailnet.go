@@ -12,19 +12,47 @@ import (
 func (s *Service) Loop() {
 restartOuter:
 	for {
+		if s.consumeRestart() {
+			continue restartOuter
+		}
 		s.mu.Lock()
+		key, locked := s.key, s.locked
 		ephemeral := s.ephemeral
+		s.mu.Unlock()
+		if locked {
+			s.tracker.SetStatus("locked")
+			<-s.restart
+			continue restartOuter
+		}
 		ctx, cancel := context.WithCancel(context.Background())
+		s.mu.Lock()
 		s.cancel = cancel
 		s.mu.Unlock()
-		srv := tailnet.New(s.paths.StateDir, ephemeral, s.userLogf)
+		store, err := tailnet.OpenState(s.paths.StateDir, key)
+		if err != nil {
+			cancel()
+			log.Printf("state store: %v", err)
+			s.mu.Lock()
+			s.locked, s.key = true, ""
+			s.mu.Unlock()
+			s.tracker.SetStatus("locked")
+			<-s.restart
+			continue restartOuter
+		}
+		srv := tailnet.New(s.paths.StateDir, ephemeral, s.userLogf, store)
+		if s.consumeRestart() {
+			cancel()
+			continue restartOuter
+		}
 		if err := srv.Start(); err != nil {
 			s.tracker.SetStatus("tailnet error: " + err.Error())
 			log.Printf("tailnet start failed: %v", err)
 			select {
 			case <-s.restart:
+				cancel()
 				continue restartOuter
 			case <-time.After(10 * time.Second):
+				cancel()
 				continue restartOuter
 			}
 		}
@@ -38,6 +66,7 @@ restartOuter:
 		for attempt := 0; ; attempt++ {
 			select {
 			case <-s.restart:
+				cancel()
 				closeTimeout(srv, 10*time.Second)
 				continue restartOuter
 			default:
@@ -65,6 +94,7 @@ restartOuter:
 			wait := time.Duration(min(attempt+1, 5)) * 10 * time.Second
 			select {
 			case <-s.restart:
+				cancel()
 				closeTimeout(srv, 10*time.Second)
 				continue restartOuter
 			case <-time.After(wait):
@@ -73,6 +103,7 @@ restartOuter:
 		}
 
 		<-s.restart
+		cancel()
 		closeTimeout(srv, 10*time.Second)
 	}
 }

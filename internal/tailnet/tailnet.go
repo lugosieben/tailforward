@@ -29,15 +29,19 @@ type Server struct {
 	inner *tsnet.Server
 }
 
-func New(dir string, ephemeral bool, userLogf func(string, ...any)) *Server {
-	return &Server{inner: &tsnet.Server{
+func New(dir string, ephemeral bool, userLogf func(string, ...any), store ipn.StateStore) *Server {
+	srv := &tsnet.Server{
 		Hostname:  "tailforward",
 		Dir:       dir,
 		Ephemeral: ephemeral,
 		AuthKey:   strings.TrimSpace(os.Getenv("TS_AUTHKEY")),
 		Logf:      func(string, ...any) {},
 		UserLogf:  userLogf,
-	}}
+	}
+	if store != nil {
+		srv.Store = store
+	}
+	return &Server{inner: srv}
 }
 
 func LoginURL(text string) (string, bool) {

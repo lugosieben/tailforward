@@ -2,17 +2,23 @@ package store
 
 import (
 	"encoding/json"
+	"errors"
+	"io/fs"
 	"log"
-	"os"
+
+	"tailforward/internal/crypt"
 )
 
 type settings struct {
 	Ephemeral *bool `json:"ephemeral"`
 }
 
-func LoadEphemeral(path string) bool {
-	data, err := os.ReadFile(path)
+func LoadEphemeral(path, key string) bool {
+	data, err := crypt.ReadFile(path, key)
 	if err != nil {
+		if !errors.Is(err, crypt.ErrEncrypted) && !errors.Is(err, fs.ErrNotExist) {
+			log.Printf("ignoring unreadable %s: %v", path, err)
+		}
 		return true
 	}
 	var s settings
@@ -25,9 +31,9 @@ func LoadEphemeral(path string) bool {
 	return *s.Ephemeral
 }
 
-func SaveEphemeral(path string, ephemeral bool) {
+func SaveEphemeral(path string, ephemeral bool, key string) {
 	data, _ := json.MarshalIndent(settings{Ephemeral: &ephemeral}, "", "  ")
-	if err := os.WriteFile(path, data, 0600); err != nil {
+	if err := crypt.WriteFile(path, data, key); err != nil {
 		log.Printf("cannot save %s: %v", path, err)
 	}
 }

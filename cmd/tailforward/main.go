@@ -30,9 +30,17 @@ func main() {
 	go svc.Loop()
 
 	addr := fmt.Sprintf("127.0.0.1:%d", domain.DashboardPort)
-	ln, err := net.Listen("tcp", addr)
-	if err != nil {
-		log.Fatal(err)
+	var ln net.Listener
+	for attempt := 1; ; attempt++ {
+		ln, err = net.Listen("tcp", addr)
+		if err == nil {
+			break
+		}
+		if attempt >= 20 {
+			log.Fatal(err)
+		}
+		log.Printf("dashboard port busy, retrying: %v", err)
+		time.Sleep(500 * time.Millisecond)
 	}
 	if !*noBrowser {
 		go browser.Open("http://" + addr + "/")

@@ -8,6 +8,10 @@ import (
 
 func (s *Service) SetEphemeral(ephemeral bool) (bool, error) {
 	s.mu.Lock()
+	if s.locked {
+		s.mu.Unlock()
+		return false, ErrLocked
+	}
 	if s.reauthing {
 		s.mu.Unlock()
 		return false, ErrReauthInProgress
@@ -18,6 +22,7 @@ func (s *Service) SetEphemeral(ephemeral bool) (bool, error) {
 	}
 	s.reauthing = true
 	old := s.server
+	key := s.key
 	s.ephemeral = ephemeral
 	s.mu.Unlock()
 	defer func() {
@@ -26,7 +31,7 @@ func (s *Service) SetEphemeral(ephemeral bool) (bool, error) {
 		s.mu.Unlock()
 	}()
 
-	store.SaveEphemeral(s.paths.SettingsFile, ephemeral)
+	store.SaveEphemeral(s.paths.SettingsFile, ephemeral, key)
 	if ephemeral {
 		s.restartTailnet(old, "mode: switching to ephemeral, logging out")
 		log.Print("mode: now ephemeral")

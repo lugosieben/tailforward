@@ -9,6 +9,10 @@ var ErrReauthInProgress = errors.New("reauth already in progress")
 
 func (s *Service) Reauth() error {
 	s.mu.Lock()
+	if s.locked {
+		s.mu.Unlock()
+		return ErrLocked
+	}
 	if s.reauthing {
 		s.mu.Unlock()
 		return ErrReauthInProgress
