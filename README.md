@@ -32,6 +32,8 @@ You can then manage your encryption:
 `mod key`: Change the key to something different<br>
 `rm key`: Remove encryption key -> files become unencrypted aswell
 
+You are automatically locked out again when restarting the application or clicking `lock`. Your unencrypted data is never saved to disk while having a key active.
+
 ## License
 
 tailforward is licensed under the MIT License.
